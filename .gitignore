@@ -1,0 +1,20 @@
+# Built files
+*.[ao]
+*.so
+*.dll
+*.lib
+*.dylib
+
+# Autotools noise
+*.lo
+*.la
+Makefile.in
+Makefile
+/configure
+/aclocal.m4
+/libtool
+/autom4te.cache/
+/build-aux/
+/m4/libtool.m4
+/m4/lt*.m4
+/lib/config.h*

@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+
+"""
+This script generates the boilerplate for a GeanyPy plugin, including the
+Autotools build system and a trivial starter plugin implementation.
+"""
+
+import os
+import string
+import sys
+
+
+TEMPLATE_DIR = "@pkgdatadir@/template"
+
+
+PLUGIN_KEYS = [
+  "name",
+  "description",
+  "version",
+  "bugreport",
+  "author",
+  "module",
+]
+
+
+OUTPUT_FILES = {
+  "autogen.sh":    (0o755, None),
+  "configure.ac":  (0o644, None),
+  "Makefile.am":   (0o644, None),
+  "plugin.c":      (0o644, None),
+  "plugin.py":     (0o644, "$$${plugin_module}.py"),
+  ".gitignore":    (0o644, None),
+  "README.md":     (0o644, None),
+}
+
+
+def parse_config_file(filename):
+  with open(filename) as cfg_file:
+    d = {}
+    for line in cfg_file:
+      line = line.strip()
+      if not line or line.startswith('#'):
+        continue
+      fields = line.split('=')
+      key = fields[0].strip().lower()
+      value = '='.join(fields[1:])
+      if key.startswith('PLUGIN_'):
+        key = key[7:]
+      if key in PLUGIN_KEYS:
+        value = value.strip()
+        if not value:
+          raise ValueError("Invalid value for key '{}' in config file".format(key))
+        d[key] = value.strip()
+      else:
+        raise KeyError("Unknown key in config file '{}'".format(key))
+  return d
+
+
+def parse_environment():
+  d = {}
+  for key in PLUGIN_KEYS:
+    if key in os.environ:
+      d[key] = os.environ[key]
+  return d
+
+
+def parse_args(args):
+  import argparse
+
+  par = argparse.ArgumentParser(
+    description="Generate boilerplate for new GeanyPy plugin",
+    epilog="""\
+You can also use the environment variables 'PLUGIN_MODULE',
+'PLUGIN_NAME', 'PLUGIN_DESCRIPTION', 'PLUGIN_VERSION',
+'PLUGIN_AUTHOR', and 'PLUGIN_BUGREPORT' instead of the command
+line arguments. The same keys as the environment variables can also be
+specified in a configuration file using the '-c'/'--config' argument.
+All values must be specified, either by command-line arguments, environment
+variables or configuration file values, in that order."""
+  )
+
+  par.add_argument("-f", "--force", action="store_true", default=False,
+                   help="Write output files even if OUTPUT_DIRECTORY is "+
+                        "exists and is not empty (not recommended without "+
+                        "a backup)")
+
+  par.add_argument("-c", "--config", metavar="FILE", dest="config",
+                   help="A configuration file with one entry per line line "+
+                        "and key/value pairs on each line separated by "+
+                        "'=' (equals) symbol")
+
+  par.add_argument("-m", "--module", metavar="STR", dest="module",
+                   help="module/package import as in Python (ex. 'foo.bar')")
+
+  par.add_argument("-n", "--name", metavar="STR", dest="name",
+                   help="human-readable name (ex. 'Foo')")
+
+  par.add_argument("-d", "--description", metavar="STR", dest="description",
+                   help="human-readable description (ex. 'The Foo plugin')")
+
+  par.add_argument("-v", "--version", metavar="STR", dest="version",
+                   help="human-readable version number (ex. '0.01')")
+
+  par.add_argument("-a", "--author", metavar="STR", dest="author",
+                   help="author(s) and/or maintainer(s) (ex. 'John Smith "+
+                        "<jsmith@foo.org>')")
+
+  par.add_argument("-b", "--bugreport", metavar="STR", dest="bugreport",
+                   help="bug report website or email address (ex. "+
+                        "'https://github.com/foo/bar/issues')")
+
+  par.add_argument("directory", metavar="OUTPUT_DIRECTORY",
+                   help="the output directory where files should be written"+
+                        "must be empty unless '--force' is specified")
+
+  args = vars(par.parse_args(args[1:]))
+
+  config_dict = {}
+
+  # Try to avoid accidentally clobbering files in the out dir without -f
+  if os.path.exists(args["directory"]):
+    if len(os.listdir()) > 0 and not args["force"]:
+      par.error("Output directory exists and is not empty, refusing to "+
+                "clobber. Use '--force' to override.")
+
+  # First read options from config file, if specified
+  if "plugin_config" in args:
+    config_filename = args["plugin_config"]
+    if config_filename:
+      try:
+        config_dict.update(parse_config_file(config_filename))
+      except FileNotFoundError as err:
+        par.error("Invalid config file specified: {}".format(err.strerror))
+
+  # Then override with options from the environment variables
+  config_dict.update(parse_environment())
+
+  # Then override with the options from the command line
+  for key in PLUGIN_KEYS:
+    if key in args:
+      value = args[key]
+      if value:
+        config_dict[key] = value
+
+  # Ensure no required arguments are missing
+  for key in PLUGIN_KEYS:
+    if key not in config_dict:
+      par.error("Missing option '--{}'".format(key))
+    value = config_dict[key]
+    if not value:
+      par.error("Missing value for required '--{}' option".format(key))
+
+  # Prefix all the keys with 'plugin_' for template substitution
+  new_dict = {}
+  for k,v in config_dict.items():
+    new_dict["plugin_{}".format(k)] = v
+  config_dict = new_dict
+
+  return (args["directory"], config_dict)
+
+
+def ensure_directories(root_dir):
+  for out_filename, info in OUTPUT_FILES.items():
+    full = os.path.join(root_dir, out_filename)
+    dn = os.path.dirname(full)
+    try:
+      os.makedirs(dn)
+    except FileExistsError:
+      pass
+
+
+class CustomTemplate(string.Template):
+  delimiter = '$$$'
+  def __init__(self, text):
+    super().__init__(text)
+
+
+def generate_files(root_dir, cfg_dict):
+  ensure_directories(root_dir)
+  for out_fn, info in OUTPUT_FILES.items():
+    src_path = os.path.join(TEMPLATE_DIR, out_fn)
+    if not info[1]:
+      dst_path = os.path.join(root_dir, out_fn)
+    else:
+      dst_path = os.path.join(root_dir, CustomTemplate(info[1]).substitute(cfg_dict))
+    with open(src_path) as src_file:
+      text = src_file.read()
+      with open(dst_path, 'w') as dst_file:
+        dst_file.write(CustomTemplate(text).substitute(cfg_dict))
+        os.chmod(dst_path, info[0])
+
+
+def main(args):
+  generate_files(*parse_args(args))
+  return 0
+
+
+if __name__ == "__main__":
+  sys.exit(main(sys.argv))

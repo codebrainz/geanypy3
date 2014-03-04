@@ -1,0 +1,15 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+plugindir=@libdir@/geany
+moduledir=@libdir@/geanypy
+geany_version=1.23
+python_version=3.3
+
+Name: GeanyPy
+Description: GeanyPy library for writing Geany plugins in Python
+Requires: geany >= ${geany_version} python3 >= ${python_version}
+Version: @PACKAGE_VERSION@
+Libs: -L${libdir} -lgeanypy
+Cflags: -I${includedir}/geanypy
